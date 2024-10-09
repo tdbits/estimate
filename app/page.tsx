@@ -83,6 +83,19 @@ export default function Home() {
     setMinuteValueDialogOpen(false);
   }
 
+  const onUnload = (event: BeforeUnloadEvent) => {
+    event.preventDefault();
+    return true;
+  }
+
+  useEffect(() => {
+    if (items.length > 0) {
+      window.addEventListener('beforeunload', onUnload);
+    } else {
+      window.removeEventListener('beforeunload', onUnload);
+    }
+  }, [items]);
+
   useEffect(() => {
     if (minuteValue !== undefined && minuteValue > 0) {
       setItems(items.map(item => updateMinuteValues(item, minuteValue)));
