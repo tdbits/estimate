@@ -1,3 +1,5 @@
+import { Group, isItemGroup, UserStory } from "./types";
+
 type Duration = {
     weeks: number,
     days: number,
@@ -7,9 +9,9 @@ type Duration = {
 
 export function convertToMinutes(duration: Duration): number {
     return (duration.weeks * 5 * 8 * 60) +
-            (duration.days * 8 * 60) +
-            (duration.hours * 60) +
-            duration.minutes;
+        (duration.days * 8 * 60) +
+        (duration.hours * 60) +
+        duration.minutes;
 }
 
 export function convertToDuration(duration: string): Duration {
@@ -65,4 +67,24 @@ export function durationToString(duration: Duration): string {
     }
 
     return components.join("");
+}
+
+export function calculateStoryPoints<T extends UserStory | Group>(item: T): number {
+    if (isItemGroup(item)) {
+        return item.stories.reduce((prev, cur) => prev + calculateStoryPoints(cur), 0);
+    } else {
+        return item.points;
+    }
+}
+
+export function calculateMinutes<T extends UserStory | Group>(item: T): number {
+    if (isItemGroup(item)) {
+        return item.stories.reduce((prev, cur) => prev + calculateMinutes(cur), 0);
+    } else if (item.modifiedMinutes !== undefined) {
+        return item.modifiedMinutes;
+    } else if (item.minutes !== undefined) {
+        return item.minutes;
+    } else {
+        return 0;
+    }
 }

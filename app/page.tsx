@@ -1,31 +1,17 @@
 'use client';
-import { AccessTime, Edit, EditOff, Restore } from "@mui/icons-material";
+import { AccessTime, Delete, Edit, EditOff, Restore } from "@mui/icons-material";
 import { AppBar, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Grid2, IconButton, LinearProgress, Menu, MenuItem, Stack, TextField, ToggleButton, ToggleButtonGroup, Toolbar, Typography } from "@mui/material";
 import Grid from "@mui/material/Grid2";
 import { useEffect, useState } from "react";
-import { convertMinutes, convertToDuration, convertToMinutes, durationToString } from "./utils";
+import { calculateMinutes, calculateStoryPoints, convertMinutes, convertToDuration, convertToMinutes, durationToString } from "./utils";
+import { Group, isItemGroup, UserStory } from "./types";
 
-type Item = {
-  name: string,
-  points: number,
-  minutes?: number,
-  modifiedMinutes?: number
-}
 
-type ItemGroup = {
-  title: string,
-  items: Item[]
-}
-
-function isItemGroup(obj: any): obj is ItemGroup {
-  return "title" in obj && "items" in obj;
-}
-
-function updateMinuteValues<T extends Item | ItemGroup>(item: T, minuteValue: number): T {
+function updateMinuteValues<T extends UserStory | Group>(item: T, minuteValue: number): T {
   if (isItemGroup(item)) {
     return {
       ...item,
-      items: item.items.map(item => updateMinuteValues(item, minuteValue))
+      stories: item.stories.map(item => updateMinuteValues(item, minuteValue))
     }
   } else {
     return {
@@ -35,42 +21,15 @@ function updateMinuteValues<T extends Item | ItemGroup>(item: T, minuteValue: nu
   }
 }
 
-function calculateStoryPoints<T extends Item | ItemGroup>(item: T): number {
-  if (isItemGroup(item)) {
-    return item.items.reduce((prev, cur) => prev + calculateStoryPoints(cur), 0);
-  } else {
-    return item.points;
-  }
-}
-
-function calculateMinutes<T extends Item | ItemGroup>(item: T): number {
-  if (isItemGroup(item)) {
-    return item.items.reduce((prev, cur) => prev + calculateMinutes(cur), 0);
-  } else if (item.modifiedMinutes !== undefined) {
-    return item.modifiedMinutes;
-  } else if (item.minutes !== undefined) {
-    return item.minutes;
-  } else {
-    return 0;
-  }
-}
-
-function updateItem(items: Array<Item | ItemGroup>, itemIdx: number, item: Item | ItemGroup) {
-  return [
-    ...items.slice(0, itemIdx),
-    item,
-    ...items.slice(itemIdx + 1)
-  ];
-}
-
-function deleteItem(items: Array<Item | ItemGroup>, itemIdx: number) {
-  const updatedItems = [...items];
-  updatedItems.splice(itemIdx, 1);
-  return updatedItems;
-}
+type AddGroupCallback = (group: Group) => void;
+type UpdateGroupCallback = (groupIdx: number, group: Group) => void;
+type DeleteGroupCallback = (groupIdx: number) => void;
+type AddUserStoryCallback = (groupIdx: number, userStory: UserStory) => void;
+type UpdateUserStoryCallback = (groupIdx: number, storyIdx: number, userStory: UserStory) => void;
+type DeleteUserStoryCallback = (groupIdx: number, storyIdx: number) => void;
 
 export default function Home() {
-  const [items, setItems] = useState<Array<Item | ItemGroup>>([]);
+  const [groups, setGroups] = useState<Array<Group>>([]);
   const [editModeEnabled, setEditModeEnabled] = useState<boolean>(true);
   const [minuteValue, setMinuteValue] = useState<number>();
   const [minuteValueDialogOpen, setMinuteValueDialogOpen] = useState<boolean>(false);
@@ -83,22 +42,72 @@ export default function Home() {
     setMinuteValueDialogOpen(false);
   }
 
+  const handleAddGroup = ((itemGroup: Group) => {
+    setGroups([
+      ...groups,
+      itemGroup
+    ]);
+  });
+
+  const handleUpdateGroup = (groupIdx: number, group: Group) => {
+    const updatedItems = [...groups];
+    updatedItems[groupIdx] = group;
+    setGroups(updatedItems);
+  }
+
+  const handleDeleteGroup = (groupIdx: number) => {
+    const updatedGroups = [...groups];
+    updatedGroups.splice(groupIdx, 1);
+    setGroups(updatedGroups);
+  }
+
+  const handleAddUserStory = (groupIdx: number, userStory: UserStory) => {
+    const group = groups[groupIdx];
+    const updatedGroup: Group = {
+      ...group,
+      stories: [
+        ...group.stories,
+        {
+          ...userStory,
+          minutes: minuteValue !== undefined ? userStory.points * minuteValue : userStory.minutes
+        } as UserStory
+      ]
+    }
+    handleUpdateGroup(groupIdx, updatedGroup);
+  }
+
+  const handleUpdateUserStory = (groupIdx: number, storyIdx: number, userStory: UserStory) => {
+    const group = groups[groupIdx];
+    const updatedStory: UserStory = {
+      ...userStory,
+      minutes: minuteValue !== undefined ? userStory.points * minuteValue : userStory.minutes
+    }
+    group.stories[storyIdx] = updatedStory;
+    handleUpdateGroup(groupIdx, group);
+  }
+
+  const handleDeleteUserStory = (groupIdx: number, storyIdx: number) => {
+    const group = groups[groupIdx];
+    group.stories.splice(groupIdx, 1);
+    handleUpdateGroup(groupIdx, group);
+  }
+
   const onUnload = (event: BeforeUnloadEvent) => {
     event.preventDefault();
     return true;
   }
 
   useEffect(() => {
-    if (items.length > 0) {
+    if (groups.length > 0) {
       window.addEventListener('beforeunload', onUnload);
     } else {
       window.removeEventListener('beforeunload', onUnload);
     }
-  }, [items]);
+  }, [groups]);
 
   useEffect(() => {
     if (minuteValue !== undefined && minuteValue > 0) {
-      setItems(items.map(item => updateMinuteValues(item, minuteValue)));
+      setGroups(groups.map(item => updateMinuteValues(item, minuteValue)));
     }
   }, [minuteValue])
 
@@ -125,60 +134,30 @@ export default function Home() {
           </IconButton>
         </Toolbar>
       </AppBar>
-      <Grid container spacing={1} sx={{ paddingTop: "5em" }}>
+      <Grid container spacing={1} sx={{ paddingTop: "5em", paddingBottom: "5em" }}>
         {editModeEnabled &&
           <Grid size={12}>
             <AddElementTextField
               label="Group title"
-              onSubmit={name => setItems([
-                ...items,
-                {
-                  title: name,
-                  items: []
-                }
-              ])}
+              onSubmit={title => handleAddGroup({
+                title: title,
+                stories: []
+              })}
             />
           </Grid>
         }
         <Grid size={12}>
-          {items.map((item, idx) => {
-            if (isItemGroup(item)) {
-              return (
-                <ItemGroupElement
-                  group={item}
-                  groupIdx={idx}
-                  editModeEnabled={editModeEnabled}
-                  addItem={item => setItems([
-                    ...items,
-                    item
-                  ])}
-                  onUpdate={(itemIdx, item) => {
-                    const updatedItems = updateItem(items, itemIdx, item);
-                    setItems(updatedItems);
-                  }}
-                  onDelete={(itemIdx) => {
-                    const updatedItems = deleteItem(items, itemIdx);
-                    setItems(updatedItems);
-                  }}
-                />
-              )
-            } else {
-              return (
-                <UserStoryElement
-                  key={idx}
-                  item={item}
-                  itemIdx={idx}
-                  onUpdate={(itemIdx, item) => {
-                    const updatedItems = updateItem(items, itemIdx, item);
-                    setItems(updatedItems);
-                  }}
-                  onDelete={(itemIdx) => {
-                    const updatedItems = deleteItem(items, itemIdx);
-                    setItems(updatedItems);
-                  }}
-                />
-              )
-            }
+          {groups.map((group, idx) => {
+            return (
+              <GroupElement
+                group={group}
+                groupIdx={idx}
+                editModeEnabled={editModeEnabled}
+                onAddUserStory={handleAddUserStory}
+                onUpdateUserStory={handleUpdateUserStory}
+                onDeleteUserStory={handleDeleteUserStory}
+              />
+            )
           })}
         </Grid>
       </Grid>
@@ -186,13 +165,13 @@ export default function Home() {
         <Toolbar>
           <Grid2 container spacing={2}>
             <Grid2>
-              <Typography component="span">Story Points: {items.reduce((prevValue, curValue) => prevValue + calculateStoryPoints(curValue), 0)}</Typography>
+              <Typography component="span">Story Points: {groups.reduce((prevValue, curValue) => prevValue + calculateStoryPoints(curValue), 0)}</Typography>
             </Grid2>
             <Grid2>
               {minuteValue !== undefined &&
                 <Typography component="span">Gesamtzeit: {
                   <EstimatedTime
-                    minutes={items.reduce((prevValue, curValue) => prevValue + calculateMinutes(curValue), 0)}
+                    minutes={groups.reduce((prevValue, curValue) => prevValue + calculateMinutes(curValue), 0)}
                     editable={false}
                   />
                 }</Typography>
@@ -239,12 +218,7 @@ export default function Home() {
   );
 }
 
-type onSubmitCallback = (name: string) => void;
-type addItemCallback = (item: Item) => void;
-type onUpdateCallback = (itemIdx: number, item: Item | ItemGroup) => void;
-type onDeleteCallback = (itemIdx: number) => void;
-
-function AddElementTextField({ label, onSubmit }: { label: string, onSubmit: onSubmitCallback }) {
+function AddElementTextField({ label, onSubmit }: { label: string, onSubmit: (name: string) => void }) {
   const [textFieldValue, setTextFieldValue] = useState<string>("");
 
   return (
@@ -265,50 +239,36 @@ function AddElementTextField({ label, onSubmit }: { label: string, onSubmit: onS
   );
 }
 
-function ItemGroupElement({ group, groupIdx, editModeEnabled, onUpdate, onDelete }: { group: ItemGroup, groupIdx: number, editModeEnabled: boolean, addItem: addItemCallback, onUpdate: onUpdateCallback, onDelete: onDeleteCallback }) {
+function GroupElement({ group, groupIdx, editModeEnabled, onAddUserStory, onUpdateUserStory, onDeleteUserStory }: { group: Group, groupIdx: number, editModeEnabled: boolean, onAddUserStory: AddUserStoryCallback, onUpdateUserStory: UpdateUserStoryCallback, onDeleteUserStory: DeleteUserStoryCallback }) {
   return (
     <Card>
       <CardContent>
         <Stack direction="column" spacing={1}>
           <Stack direction="row" spacing={1}>
             <Typography sx={{ fontWeight: "bold" }}>{group.title}</Typography>
-            <Chip label={group.items.reduce((prev, cur) => prev + calculateStoryPoints(cur), 0)} color="primary" variant="outlined" size="small" />
+            <Chip label={group.stories.reduce((prev, cur) => prev + calculateStoryPoints(cur), 0)} color="primary" variant="outlined" size="small" />
             <EstimatedTime
-              minutes={group.items.reduce((prev, cur) => prev + calculateMinutes(cur), 0)}
+              minutes={group.stories.reduce((prev, cur) => prev + calculateMinutes(cur), 0)}
               editable={false}
             />
           </Stack>
           {editModeEnabled &&
             <AddElementTextField
               label="User Story"
-              onSubmit={name => onUpdate(groupIdx, {
-                ...group,
-                items: [
-                  ...group.items,
-                  {
-                    name: name,
-                    points: 0
-                  }
-                ]
+              onSubmit={name => onAddUserStory(groupIdx, {
+                name: name,
+                points: 0
               })}
             />
           }
-          {group.items.map((item, idx) => (
+          {group.stories.map((item, idx) => (
             <UserStoryElement
               key={idx}
               item={item}
+              groupIdx={groupIdx}
               itemIdx={idx}
-              onUpdate={(itemIdx, item) => {
-                const updatedItems = updateItem(group.items, itemIdx, item) as Item[];
-                onUpdate(groupIdx, {
-                  ...group,
-                  items: updatedItems
-                });
-              }}
-              onDelete={itemIdx => {
-                const updatedItems = deleteItem(group.items, groupIdx);
-                deleteItem(updatedItems, itemIdx);
-              }}
+              onUpdate={onUpdateUserStory}
+              onDelete={onDeleteUserStory}
             />
           ))}
         </Stack>
@@ -317,10 +277,11 @@ function ItemGroupElement({ group, groupIdx, editModeEnabled, onUpdate, onDelete
   )
 }
 
-function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, itemIdx: number, onUpdate: onUpdateCallback, onDelete: onDeleteCallback }) {
-  const [storyItem, setStoryItem] = useState<Item | undefined>();
+function UserStoryElement({ item, groupIdx, itemIdx, onUpdate, onDelete }: { item: UserStory, groupIdx: number, itemIdx: number, onUpdate: UpdateUserStoryCallback, onDelete: DeleteUserStoryCallback }) {
+  const [storyItem, setStoryItem] = useState<UserStory | undefined>();
   const [contextMenu, setContextMenu] = useState<{
     type: 'name' | 'points';
+    groupIdx: number;
     itemIdx: number;
     mouseX: number;
     mouseY: number;
@@ -332,12 +293,13 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
     setStoryItem(item);
   }, [item])
 
-  const handleContextMenu = (event: React.MouseEvent, itemIdx: number, type: 'name' | 'points') => {
+  const handleContextMenu = (event: React.MouseEvent, groupIdx: number, itemIdx: number, type: 'name' | 'points') => {
     event.preventDefault();
     setContextMenu(
       contextMenu === null
         ? {
           type: type,
+          groupIdx: groupIdx,
           itemIdx: itemIdx,
           mouseX: event.clientX + 2,
           mouseY: event.clientY - 6,
@@ -354,7 +316,7 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
 
   return (
     <Grid container spacing={1}>
-      <Grid size={4} onContextMenu={event => handleContextMenu(event, itemIdx, 'name')}>
+      <Grid size={4} onContextMenu={event => handleContextMenu(event, groupIdx, itemIdx, 'name')}>
         {!editMode && storyItem !== undefined &&
           <Typography>{storyItem.name}</Typography>
         }
@@ -368,6 +330,7 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
             onKeyDown={event => {
               if (event.key === "Enter") {
                 onUpdate(
+                  groupIdx,
                   itemIdx,
                   {
                     name: textFieldValue,
@@ -381,14 +344,14 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
           />
         }
       </Grid>
-      <Grid size={7} onContextMenu={event => handleContextMenu(event, itemIdx, 'points')}>
+      <Grid size={7} onContextMenu={event => handleContextMenu(event, groupIdx, itemIdx, 'points')}>
         <LinearProgress
           variant="determinate"
           value={item.points > 0 ? (item.points / 40) * 100 : 0}
           sx={{ height: "100%" }}
         />
       </Grid>
-      <Grid size={1} onContextMenu={event => handleContextMenu(event, itemIdx, 'points')}>
+      <Grid size={1}>
         <Stack direction="row" spacing={1}>
           <Chip label={item.points} color="primary" variant="outlined" />
           {item.minutes !== undefined &&
@@ -396,7 +359,7 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
               editable={true}
               minutes={item.minutes}
               modifiedMinutes={item.modifiedMinutes}
-              onMinuteChange={minutes => onUpdate(itemIdx, { ...item, modifiedMinutes: minutes })}
+              onMinuteChange={minutes => onUpdate(groupIdx, itemIdx, { ...item, modifiedMinutes: minutes })}
             />
           }
         </Stack>
@@ -418,17 +381,37 @@ function UserStoryElement({ item, itemIdx, onUpdate, onDelete }: { item: Item, i
               setEditMode(true);
               handleClose();
             }}>Bearbeiten</MenuItem>
-            <MenuItem onClick={() => onDelete(itemIdx)}>Löschen</MenuItem>
+            <MenuItem onClick={() => onDelete(groupIdx, itemIdx)}>Löschen</MenuItem>
           </>
         }
         {contextMenu !== null && contextMenu.type === 'points' &&
           <>
+            {storyItem?.points !== 0 &&
+              <Button
+                size="small"
+                onClick={() => {
+                  onUpdate(
+                    groupIdx,
+                    itemIdx,
+                    {
+                      name: item.name,
+                      points: 0
+                    }
+                  );
+                  handleClose();
+                }}
+              >
+                <Delete sx={{ fontSize: "1.25em"}} />
+              </Button>
+            }
             {[1, 2, 3, 5, 8, 13, 20, 40].map(point => (
               <Button
                 key={`button-${point}`}
                 size="small"
+                disabled={storyItem?.points === point}
                 onClick={() => {
                   onUpdate(
+                    groupIdx,
                     itemIdx,
                     {
                       name: item.name,
@@ -481,12 +464,12 @@ function EstimatedTime({ minutes, modifiedMinutes, editable, onMinuteChange = ()
   } else if (modifiedMinutes !== undefined) {
     return (
       <Stack direction="row" spacing={2}>
-        <Typography
-          component="span"
+        <Button
+          variant="outlined"
           color="primary"
         >
           {durationToString(duration)}
-        </Typography>
+        </Button>
         <IconButton
           size="small"
           onClick={() => onMinuteChange()}
@@ -497,8 +480,9 @@ function EstimatedTime({ minutes, modifiedMinutes, editable, onMinuteChange = ()
     )
   } else {
     return (
-      <Typography
-        component="span"
+      <Button
+          variant="outlined"
+          color="primary"
         onClick={() => {
           if (editable) {
             setEditMode(true);
@@ -506,7 +490,7 @@ function EstimatedTime({ minutes, modifiedMinutes, editable, onMinuteChange = ()
         }}
       >
         {durationToString(duration)}
-      </Typography>
+      </Button>
     )
   }
 }
